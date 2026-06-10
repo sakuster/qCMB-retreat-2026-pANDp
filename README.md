@@ -1,4 +1,4 @@
-#Pride & Prejudice
+#Prion & Prejudice
 
 ## Connecting GitHub and Alpine
 _These instructions were originally compiled by Eric Anderson._
