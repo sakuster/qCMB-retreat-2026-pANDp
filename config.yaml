@@ -1,0 +1,136 @@
+# ==============================================================================
+# PRION BRAIN SLICE CLASSIFICATION PIPELINE — CONFIGURATION
+# ==============================================================================
+# This file controls everything. You should not need to edit any Python files.
+# Lines starting with '#' are comments and are ignored by the program.
+#
+# PROJECT: qCMB 2026 — PrP Deposition Imaging Challenge
+#
+# DATASET OVERVIEW:
+#   Three conditions, four brain regions, 4x IHC coronal sections of mouse brain.
+#
+#   Classes:
+#     Control  — wild-type mice, non-prion-susceptible (143 images)
+#     GtElk    — gene-targeted "Elk-inized" mice infected with prions (163 images)
+#     GtDeer   — gene-targeted "Deer-inized" mice infected with prions (385 images)
+#
+#   Brain regions captured per condition:
+#     Cerebellum, Hippocampus, Midbrain, Septum
+#
+#   Folder structure on disk:
+#     data/
+#     ├── Control/
+#     │   ├── Cerebellum/
+#     │   │   ├── 4x/               ← images used by this pipeline
+#     │   │   └── higher_magnification/
+#     │   ├── Hippocampus/4x/
+#     │   ├── Midbrain/4x/
+#     │   └── Septum/4x/
+#     ├── GtElk/  (same structure)
+#     └── GtDeer/ (same structure)
+
+
+# ------------------------------------------------------------------------------
+# DATASET SETTINGS
+# ------------------------------------------------------------------------------
+dataset:
+  # Path to the root data folder containing Control/, GtElk/, GtDeer/ subfolders.
+  # Can be relative to this config file or an absolute path.
+  root: "data/"
+
+  # How class labels are determined. "folders" reads the top-level subfolder name
+  # (Control, GtElk, GtDeer) as the class label, regardless of nesting depth.
+  # Do not change this for the qCMB dataset.
+  label_source: "folders"
+
+  # Only include images whose path contains this string.
+  # Set to "4x" to use only the 4x magnification images and skip higher_magnification/.
+  path_filter: "4x"
+
+  # ---- Settings for label_source: "csv" (not used for qCMB dataset) ----
+  csv_path: "labels.csv"
+  csv_image_column: "filename"
+  csv_label_column: "label"
+
+  # ---- Settings for label_source: "filename" (not used for qCMB dataset) ----
+  # A regex with a named group called 'label' — test at: https://regex101.com
+  filename_pattern: "(?P<label>[a-zA-Z_]+)_\\d+"
+
+  # Image file types to search for (case-insensitive)
+  extensions: [".tiff", ".tif", ".png", ".jpg"]
+
+  # The name of the negative/uninfected control class as it appears in the folder name.
+  control_label: "Control"
+
+
+# ------------------------------------------------------------------------------
+# TRAINING SETTINGS
+# ------------------------------------------------------------------------------
+training:
+  # Fraction of images held out for validation (e.g. 0.2 = 20%)
+  # These images are never shown to the model during training.
+  validation_split: 0.2
+
+  # Number of passes through the full training set.
+  # 50 is a safe default; the best checkpoint is always saved automatically.
+  epochs: 50
+
+  # Number of images processed at once. Reduce if you run out of GPU memory.
+  batch_size: 16
+
+  # How fast the model learns. Lower = more stable but slower.
+  learning_rate: 0.0001
+
+  # Image dimensions in pixels after resizing.
+  # 1024 preserves enough regional detail at 4x magnification.
+  image_size: 1024
+
+  # Set to false to train on CPU (much slower — not recommended)
+  use_gpu: true
+
+  # Number of CPU workers for loading images in parallel.
+  # Set to 0 if you encounter multiprocessing errors.
+  num_workers: 4
+
+
+# ------------------------------------------------------------------------------
+# OUTPUT SETTINGS
+# ------------------------------------------------------------------------------
+output:
+  # Folder where results, figures, and the trained model will be saved.
+  results_dir: "results/"
+
+  # Generate GradCAM heatmaps showing which brain regions drove each classification.
+  # Saved to results/gradcam/ — directly satisfies the challenge heatmap requirement.
+  save_gradcam: true
+
+  # How many GradCAM images to generate (saving all 691 is slow; 60 covers 2 per class/region)
+  gradcam_max_images: 60
+
+  # Generate a UMAP plot of all sample embeddings coloured by class.
+  # Outlier clusters in this plot indicate potential undiscovered prion subtypes.
+  save_umap: true
+
+  # Samples scoring this many standard deviations above the mean OOD score
+  # are flagged as potential new subtypes. Higher = stricter (fewer flags).
+  ood_threshold: 3.0
+
+  # Quantify the degree of PrP (DAB brown staining) deposition per image.
+  # Adds infection_score, mean_dab_intensity, clean_tissue_area, and
+  # artifact_area columns to predictions.csv.
+  quantify_infection: true
+
+  # Optical density threshold (0.0–1.0) above which a pixel is counted as
+  # DAB-positive. 0.15 is the standard starting value for H-DAB IHC slides.
+  # Increase if background staining inflates scores; decrease if staining
+  # is weak. Adjust based on the save_infection_maps diagnostic panels below.
+  dab_threshold: 0.15
+
+  # Save a four-panel diagnostic image (original / tissue mask / DAB heatmap /
+  # positive overlay) for each slide. Useful for verifying that artifacts
+  # (tears, folds) are being correctly excluded. Slow — enable selectively.
+  save_infection_maps: false
+
+  # Maximum number of per-slide infection map images to save when
+  # save_infection_maps is true. Set to a small number (20–30) for a quick check.
+  infection_maps_max_images: 20
