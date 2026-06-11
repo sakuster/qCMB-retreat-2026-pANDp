@@ -1,3 +1,0 @@
-GtDeer
-GtElk
-controls
