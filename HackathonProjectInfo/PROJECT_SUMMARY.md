@@ -186,7 +186,8 @@ Comments explain *why* decisions were made (e.g., why cosine distance is used fo
 | GradCAM | Spatial attribution | Requires no additional training; produces interpretable heatmaps aligned with anatomical regions |
 | UMAP | Embedding visualization | Preserves local and global structure better than t-SNE; scales to hundreds of samples in seconds |
 | Cosine OOD scoring | Novel subtype detection | Rotation-invariant; appropriate for high-dimensional embedding spaces where Euclidean distance is unreliable |
-|Claude| AI assistance engine | For assistance in generating the first version of this summary outline using the rubric provided in the qCMB Retreat Sharepoint |
+|Claude Sonnet 4.6| AI assistance engine | For assistance in generating the first version of this summary outline using the rubric provided in the qCMB Retreat SharePoint |
+|ChatGPT 5.5| AI Assistance engine | Questions on functionality and learning how to use machine learning models | 
 
 Model outputs are validated against biological priors: GradCAM attention maps should highlight regions of known PrP accumulation for each subtype. Divergence from expected anatomy flags potential model failure modes.
 
