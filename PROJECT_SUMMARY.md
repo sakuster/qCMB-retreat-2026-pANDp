@@ -7,7 +7,7 @@
 
 ### 1a. Research Question
 
-Can a machine learning pipeline automatically distinguish prion infection status and subtype from 4× immunohistochemistry (IHC) brain slice images, identify which anatomical brain regions drive those classifications, and detect images that do not fit any known prion phenotype — flagging them as candidates for previously undiscovered subtypes?
+Can we use a machine learning pipeline to automatically distinguish prion infection status and subtype (amino acid change GtE vs GtQ) from 4× immunohistochemistry (IHC) brain slice images and identify which anatomical brain regions drive those classifications?
 
 ### 1b. Specific Analytical Approach
 
