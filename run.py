@@ -82,7 +82,9 @@ def predict_new_images(config: dict, image_dir: str, checkpoint_path: str):
 
     records = []
     with torch.no_grad():
-        for img_tensor, _, filepath in dataset:
+        for _item in dataset:
+            img_tensor: torch.Tensor = _item[0]  # type: ignore[assignment]
+            filepath: str = _item[2]
             logits     = model(img_tensor.unsqueeze(0).to(device))
             probs      = torch.softmax(logits, dim=1).squeeze().cpu().numpy()
             pred_idx   = int(probs.argmax())
@@ -140,11 +142,13 @@ def main():
     # STEP 1 — Load data
     header(1, "Loading dataset")
     train_loader, val_loader, label_encoder = build_dataloaders(config)
-    num_classes = len(label_encoder.classes_)
+    _classes    = label_encoder.classes_ if label_encoder.classes_ is not None else []
+    class_names: list[str] = [str(c) for c in _classes]
+    num_classes = len(class_names)
 
     # Save class names alongside the model so predict mode works later
     with open(os.path.join(out_dir, "label_classes.txt"), "w") as f:
-        f.write("\n".join(label_encoder.classes_))
+        f.write("\n".join(class_names))
 
     # STEP 2 — Build model
     header(2, "Building model")
@@ -185,7 +189,7 @@ def main():
         tr_cfg  = config["training"]
         val_ds  = PrionDataset(
             results_df["filepath"].tolist(),
-            label_encoder.transform(results_df["true_label"]).tolist(),
+            list(label_encoder.transform(results_df["true_label"])),  # type: ignore[arg-type]
             tr_cfg.get("image_size", 1024),
             augment=False,
         )

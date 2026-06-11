@@ -78,7 +78,8 @@ def _tissue_mask(rgb: np.ndarray, bg_threshold: int = 220) -> np.ndarray:
     tissue = ndi.binary_closing(tissue, structure=np.ones((15, 15)))
 
     # Remove small disconnected fragments — keep only large tissue regions
-    labeled, n = ndi.label(tissue)
+    _label_out: tuple[np.ndarray, int] = ndi.label(tissue)  # type: ignore[assignment]
+    labeled, n = _label_out
     if n == 0:
         return tissue
     sizes = ndi.sum(tissue, labeled, range(1, n + 1))
@@ -108,7 +109,8 @@ def _artifact_mask(rgb: np.ndarray, tissue: np.ndarray) -> np.ndarray:
 
     # --- Tears: large bright regions embedded within tissue ---
     bright_in_tissue = tissue & (luminance > 215)
-    labeled, n = ndi.label(bright_in_tissue)
+    _label_out2: tuple[np.ndarray, int] = ndi.label(bright_in_tissue)  # type: ignore[assignment]
+    labeled, n = _label_out2
     if n > 0:
         sizes = ndi.sum(bright_in_tissue, labeled, range(1, n + 1))
         tears = np.isin(labeled, np.where(np.array(sizes) > 2000)[0] + 1)

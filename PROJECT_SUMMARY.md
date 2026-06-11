@@ -1,6 +1,15 @@
 # qCMB 2026 — PrP Deposition Imaging Challenge
 ## Project Summary: Automated Prion Subtype Classification from IHC Brain Slices
 
+Notes:
+1. draft feedback report - make a list of ways the images could be improved (including file naming and organization)
+2. are images from the same or multiple animals? how should images from a single animal be treated?
+
+Alpine Commands
+# To activate this environment, use
+#
+#     $ conda activate prion_pipeline
+#
 ---
 
 ## 1. Scientific Framing

@@ -9,43 +9,45 @@
 # DATASET OVERVIEW:
 #   Three conditions, four brain regions, 4x IHC coronal sections of mouse brain.
 #
-#   Classes:
-#     Control  — wild-type mice, non-prion-susceptible (143 images)
-#     GtElk    — gene-targeted "Elk-inized" mice infected with prions (163 images)
-#     GtDeer   — gene-targeted "Deer-inized" mice infected with prions (385 images)
+#   Classes (as they appear in filenames):
+#     WT_control — wild-type mice, non-prion-susceptible
+#     GtElk      — gene-targeted "Elk-inized" mice infected with prions
+#     GtDeer     — gene-targeted "Deer-inized" mice infected with prions
 #
-#   Brain regions captured per condition:
-#     Cerebellum, Hippocampus, Midbrain, Septum
+#   Brain regions:
+#     cerebellum, hippocampus, midbrain, septum
 #
 #   Folder structure on disk:
 #     data/
-#     ├── Control/
-#     │   ├── Cerebellum/
-#     │   │   ├── 4x/               ← images used by this pipeline
-#     │   │   └── higher_magnification/
-#     │   ├── Hippocampus/4x/
-#     │   ├── Midbrain/4x/
-#     │   └── Septum/4x/
-#     ├── GtElk/  (same structure)
-#     └── GtDeer/ (same structure)
+#       control/
+#         cerebellum_4x/WT_control_cerebellum_4x_01.tif
+#         hippocampus_4x/
+#         midbrain_4x/
+#         septum_4x/
+#       GtDeer/  (same structure)
+#       GtElk/   (same — Cerebellum_4x has capital C, handled automatically)
 
 
 # ------------------------------------------------------------------------------
 # DATASET SETTINGS
 # ------------------------------------------------------------------------------
 dataset:
-  # Path to the root data folder containing Control/, GtElk/, GtDeer/ subfolders.
-  # Can be relative to this config file or an absolute path.
+  # Path to the folder containing the class subfolders (control/, GtDeer/, GtElk/).
+  # "data/" keeps scans fast by excluding venv/, pipeline/, results/, etc.
+  # Set to an absolute path on Alpine where the images are stored.
   root: "data/"
 
-  # How class labels are determined. "folders" reads the top-level subfolder name
-  # (Control, GtElk, GtDeer) as the class label, regardless of nesting depth.
-  # Do not change this for the qCMB dataset.
+  # How class labels are determined.
+  #   "folders"        — top-level subfolder name is the class label (control, GtDeer, GtElk).
+  #                      Use this for the qCMB dataset.
+  #   "region_folders" — label extracted from filename, region from folder name.
+  #   "csv"            — label read from a CSV file (see csv_path below).
+  #   "filename"       — label extracted via regex (see filename_pattern below).
   label_source: "folders"
 
   # Only include images whose path contains this string.
-  # Set to "4x" to use only the 4x magnification images and skip higher_magnification/.
-  path_filter: "4x"
+  # "_4x" restricts to the 4x subfolder inside each class folder.
+  path_filter: "_4x"
 
   # ---- Settings for label_source: "csv" (not used for qCMB dataset) ----
   csv_path: "labels.csv"
@@ -59,8 +61,8 @@ dataset:
   # Image file types to search for (case-insensitive)
   extensions: [".tiff", ".tif", ".png", ".jpg"]
 
-  # The name of the negative/uninfected control class as it appears in the folder name.
-  control_label: "Control"
+  # The name of the negative/uninfected control class as it appears in folder names.
+  control_label: "control"
 
 
 # ------------------------------------------------------------------------------

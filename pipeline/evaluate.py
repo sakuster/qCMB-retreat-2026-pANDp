@@ -111,7 +111,8 @@ def evaluate(config: dict, model: PrionClassifier, val_loader, label_encoder: La
     os.makedirs(out_dir, exist_ok=True)
 
     ood_threshold = out_cfg.get("ood_threshold", 3.0)
-    class_names   = list(label_encoder.classes_)
+    classes     = label_encoder.classes_ if label_encoder.classes_ is not None else []
+    class_names: list[str] = [str(c) for c in classes]
     num_classes   = len(class_names)
 
     device = torch.device(

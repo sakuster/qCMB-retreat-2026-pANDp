@@ -1,10 +1,11 @@
 """
 data.py — Dataset discovery, label loading, and DataLoader construction.
 
-Supports three ways of organizing your labeled images:
-  1. "folders"  — subfolders named after each class
-  2. "csv"      — a CSV file mapping filenames to labels
-  3. "filename" — a regex pattern extracts the label from each filename
+Supports four ways of organizing your labeled images:
+  1. "folders"        — subfolders named after each class  (qCMB default)
+  2. "region_folders" — label extracted from filename, region from folder name
+  3. "csv"            — a CSV file mapping filenames to labels
+  4. "filename"       — a regex pattern extracts the label from each filename
 """
 
 import os
@@ -59,6 +60,9 @@ def _labels_from_folders(root: str, extensions: list, path_filter: str = "") -> 
     """
     records = []
     for filepath, relpath in find_images(root, extensions):
+        # Apply path_filter first — skips root-level files and non-data directories
+        if path_filter and path_filter not in relpath:
+            continue
         parts = Path(relpath).parts
         if not parts or len(parts) < 2:
             raise ValueError(
@@ -66,10 +70,9 @@ def _labels_from_folders(root: str, extensions: list, path_filter: str = "") -> 
                 "With label_source='folders', images must be inside subfolders named after their class.\n"
                 "Expected: data/ClassName/image.tiff  or  data/ClassName/Region/4x/image.tiff"
             )
-        if path_filter and path_filter not in relpath:
-            continue
-        label       = parts[0]
-        brain_region = parts[1] if len(parts) > 2 else ""
+        label        = parts[0]
+        raw_region   = parts[1] if len(parts) > 2 else ""
+        brain_region = re.sub(r'_4[xX]$', '', raw_region).lower()  # "Cerebellum_4x" → "cerebellum"
         records.append({"filepath": filepath, "label": label, "brain_region": brain_region})
     return pd.DataFrame(records)
 
@@ -95,6 +98,47 @@ def _labels_from_csv(root: str, csv_path: str, image_col: str, label_col: str) -
     df["filepath"] = df[image_col].apply(lambda f: str(Path(root) / f))
     df["label"] = df[label_col].astype(str)
     return pd.DataFrame(df[["filepath", "label"]])
+
+
+def _labels_from_region_folders(root: str, extensions: list, path_filter: str = "") -> pd.DataFrame:
+    """
+    For datasets organized as [label_]region_4x/ folders with files named
+    {label}_{region}_4x_{number}.tif.
+
+    Handles two folder naming conventions:
+      cerebellum_4x/WT_control_cerebellum_4x_01.tif → label="WT_control", region="cerebellum"
+      GtDeer_treatment_cerebellum_4x/GtDeer_treatment_cerebellum_4x_01.tif
+                                                     → label="GtDeer_treatment", region="cerebellum"
+
+    The region is always the LAST underscore-separated component of the folder
+    name before the _4x suffix (e.g. "cerebellum" from both "cerebellum_4x" and
+    "GtDeer_treatment_cerebellum_4x").
+
+    The label is extracted from the filename stem using "_{region}_4x_" as a
+    delimiter — this uniquely marks where the label ends. Files whose names do
+    not contain this marker are silently skipped (prevents picking up
+    non-data images from unrelated subdirectories such as venv/).
+    """
+    records = []
+    for filepath, relpath in find_images(root, extensions):
+        if path_filter and path_filter not in relpath:
+            continue
+        parts = Path(relpath).parts
+        if len(parts) < 2:
+            continue
+        folder_name = parts[0]
+        # Region = last component before the _4x suffix
+        folder_prefix = re.sub(r'_4[xX]$', '', folder_name).lower()
+        region = folder_prefix.split('_')[-1]
+        # Label = stem up to _{region}_4x_ which uniquely marks the boundary
+        stem   = Path(parts[-1]).stem
+        marker = f'_{region}_4x_'
+        idx    = stem.find(marker)
+        if idx == -1:
+            continue  # not a data file (e.g. venv icons, unrelated images)
+        label  = stem[:idx]
+        records.append({"filepath": filepath, "label": label, "brain_region": region})
+    return pd.DataFrame(records)
 
 
 def _labels_from_filename(root: str, pattern: str, extensions: list) -> pd.DataFrame:
@@ -200,6 +244,8 @@ def build_dataloaders(config: dict):
 
     if source == "folders":
         df = _labels_from_folders(root, extensions, path_filter=ds.get("path_filter", ""))
+    elif source == "region_folders":
+        df = _labels_from_region_folders(root, extensions, path_filter=ds.get("path_filter", ""))
     elif source == "csv":
         df = _labels_from_csv(root, ds["csv_path"], ds["csv_image_column"], ds["csv_label_column"])
     elif source == "filename":
@@ -207,7 +253,7 @@ def build_dataloaders(config: dict):
     else:
         raise ValueError(
             f"Unknown label_source: '{source}'.\n"
-            "Valid options are: 'folders', 'csv', 'filename'."
+            "Valid options are: 'folders', 'region_folders', 'csv', 'filename'."
         )
 
     print(f"  Found {len(df)} images across {df['label'].nunique()} class(es): "
@@ -215,7 +261,7 @@ def build_dataloaders(config: dict):
 
     # Encode string labels ("control", "subtype_a", ...) to integers (0, 1, ...)
     encoder = LabelEncoder()
-    df["label_idx"] = encoder.fit_transform(df["label"])
+    df["label_idx"] = list(encoder.fit_transform(df["label"]))  # type: ignore[arg-type]
 
     val_split  = tr.get("validation_split", 0.2)
     image_size = tr.get("image_size", 1024)
