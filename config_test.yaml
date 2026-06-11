@@ -3,7 +3,7 @@
 # Full-run settings are in config.yaml.
 
 dataset:
-  root: "data/"
+  root: "/Users/eliud.rivas/Desktop/qCMB_hackathon2026/hackathon"
   label_source: "folders"
   path_filter: "_4x"
   control_label: "control"

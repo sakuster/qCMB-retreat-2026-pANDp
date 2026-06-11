@@ -1,0 +1,21 @@
+# Copilot Instructions
+
+- This project is a config-driven prion IHC image pipeline. `run.py` orchestrates the whole flow: data loading → model build → training → evaluation/OOD detection → visualizations.
+- Core modules are single-purpose: `pipeline/data.py`, `pipeline/model.py`, `pipeline/train.py`, `pipeline/evaluate.py`, `pipeline/quantify.py`, and `pipeline/visualize.py`.
+- The default dataset layout uses top-level class folders and `_4x` subfolders. In `config.yaml`, `label_source: "folders"` means the class label comes from the first path component, while `path_filter: "_4x"` limits scans to the 4x images.
+- Brain region metadata is inferred from the folder structure and propagated into outputs. Do not hardcode class counts or region names.
+- `pipeline/data.py` also supports `label_source: "region_folders"`, `"csv"`, and `"filename"`; keep those modes working when changing dataset logic.
+- The model in `pipeline/model.py` is EfficientNet-B4 pretrained on ImageNet with a 512-dim embedding layer and a final classifier head.
+- The embedding layer is not optional: `pipeline/evaluate.py` uses it for UMAP and OOD scoring, and `pipeline/visualize.py` uses it for interpretation.
+- Training uses inverse-frequency class weights, Adam, and `ReduceLROnPlateau(patience=5, factor=0.5)`. The best checkpoint is saved by validation accuracy to `results/best_model.pt`.
+- `run.py --predict <folder>` is a separate inference path. It requires both `best_model.pt` and `label_classes.txt` in the configured results directory.
+- Evaluation writes `predictions.csv` and `ood_flagged_samples.csv`; OOD scores are cosine-distance based and currently use true-label centroids in `evaluate.py`.
+- Infection quantification is part of the pipeline by default. `pipeline/quantify.py` performs H-DAB color deconvolution and excludes background plus artifacts such as tears and folds.
+- Visual outputs are saved in the results folder: `gradcam/`, `umap.png`, `confusion_matrix.png`, and optionally `infection_maps/`.
+- `pipeline/visualize.py` uses `matplotlib` with the `Agg` backend, so figures can be generated safely on headless HPC nodes.
+- The standard local setup is `python3 -m venv venv`, `source venv/bin/activate`, `pip install -r requirements.txt`, then `python run.py`.
+- Use `config_test.yaml` for a quick smoke test. It lowers image size, epochs, and workers, and disables the slow infection quantification step.
+- Alpine/HPC workflow is `bash setup_hpc.sh` followed by `sbatch run_job.sh`; the production config is `config_alpine.yaml`.
+- `requirements.txt` includes PyTorch, torchvision, scikit-learn, pandas, UMAP, Grad-CAM, SciPy, and image/plotting dependencies. Add new dependencies there if code changes require them.
+- Keep edits aligned with the existing pattern: plain-English YAML comments, small focused modules, and outputs that are easy to review as CSVs and PNGs.
+- If you change how labels are discovered or how checkpoints are named, update `run.py`, `pipeline/data.py`, and the README/setup notes together so `--predict` and the saved artifacts stay consistent.

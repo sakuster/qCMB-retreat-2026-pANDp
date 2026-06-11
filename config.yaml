@@ -35,7 +35,7 @@ dataset:
   # Path to the folder containing the class subfolders (control/, GtDeer/, GtElk/).
   # "data/" keeps scans fast by excluding venv/, pipeline/, results/, etc.
   # Set to an absolute path on Alpine where the images are stored.
-  root: "data/"
+  root: "/Users/eliud.rivas/Desktop/qCMB_hackathon2026/hackathon"
 
   # How class labels are determined.
   #   "folders"        — top-level subfolder name is the class label (control, GtDeer, GtElk).
