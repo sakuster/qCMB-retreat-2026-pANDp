@@ -2,7 +2,7 @@
 # Images are already at the path below; only code files need to be uploaded.
 
 dataset:
-  root: "/projects/danzman@colostate.edu/qCMB_hackathon"
+  root: "/projects/ka22popl@colostate.edu/qCMBRetreat26/data"
   label_source: "folders"
   path_filter: "_4x"
   control_label: "controls"
@@ -22,7 +22,7 @@ training:
   num_workers: 2
 
 output:
-  results_dir: "/projects/danzman@colostate.edu/qCMB_hackathon/results/"
+  results_dir: "/projects/ka22popl@colostate.edu/results/"
   save_gradcam: true
   gradcam_max_images: 60
   save_umap: true
