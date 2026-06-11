@@ -1,0 +1,6 @@
+filepath,brain_region,true_label,predicted_label,correct,ood_score,potential_new_subtype
+/projects/ka22popl@colostate.edu/qCMBRetreat26/data/GtDeer/septum_4x/GtDeer_treatment_septum_4x_03.tif,GtDeer,GtDeer,GtDeer,True,0.19645071,True
+/projects/ka22popl@colostate.edu/qCMBRetreat26/data/GtDeer/cerebellum_4x/GtDeer_treatment_cerebellum_4x_02.tif,GtDeer,GtDeer,controls,False,0.16481453,True
+/projects/ka22popl@colostate.edu/qCMBRetreat26/data/GtElk/midbrain_4x/GtElk_treatment_midbrain_4x_27.tif,GtElk,GtElk,GtElk,True,0.24165487,True
+/projects/ka22popl@colostate.edu/qCMBRetreat26/data/GtElk/Cerebellum_4x/GtElk_treatment_cerebellum_4x_49.tif,GtElk,GtElk,GtDeer,False,0.1894666,True
+/projects/ka22popl@colostate.edu/qCMBRetreat26/data/GtDeer/septum_4x/GtDeer_treatment_septum_4x_53.tif,GtDeer,GtDeer,GtElk,False,0.18341637,True
