@@ -1,0 +1,771 @@
+---
+title: "Post-hoc Analysis of PrP/Prion Histology ML Predictions"
+subtitle: "Brain-region-specific deposition patterns across GtDeer, GtElk, and control mice"
+author: "Eliud R. Rivas Hernandez"
+date: "`r format(Sys.Date(), '%Y-%m-%d')`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    number_sections: true
+    df_print: paged
+    code_folding: show
+params:
+  input_csv: "../results/predictions.csv"   # from pipeline/, go up one folder into results/
+  output_dir: "../psthoc"                  # post-hoc outputs are written here
+editor_options:
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, warning = FALSE, message = FALSE,
+  fig.width = 8, fig.height = 5, dpi = 150
+)
+```
+
+# Project description
+
+This report performs a **post-hoc analysis** of the output of an unsupervised /
+weakly-supervised ML image-analysis pipeline applied to PrP (prion protein)
+histology images. The goal is to evaluate whether **image-level predictions
+reveal brain-region-specific patterns of PrP deposition**, and whether those
+patterns differ across experimental groups — in particular the cervid-prion
+genotypes **GtDeer** and **GtElk** versus **controls**.
+
+> **Interpretation caveats** Everything here is *post-hoc* and based on
+> ML predictions, not independent biological validation. Results identify
+> **candidate** brain regions associated with disease-like prediction patterns;
+> they are hypotheses for follow-up, not definitive findings. Small per-cell
+> sample sizes are flagged throughout.
+
+
+# How to run
+
+From the project root, open the Rmd inside `pipeline/` and knit it, or run:
+
+```bash
+cd pipeline
+Rscript -e "rmarkdown::render('posthoc_analysis_corrected.Rmd')"
+```
+
+Required R packages: `tidyverse`, `janitor`, `stringr`, `scales`, `rmarkdown`, and `knitr`.
+If needed, install them once with:
+
+```r
+install.packages(c("tidyverse", "janitor", "stringr", "scales", "rmarkdown", "knitr"))
+```
+
+Expected folder layout:
+
+```text
+project/
+├── pipeline/
+│   └── posthoc_analysis_corrected.Rmd
+├── results/
+│   └── predictions.csv
+└── psthoc/
+    ├── cleaned_predictions.csv
+    ├── accuracy_by_region.csv
+    └── plots/
+```
+
+# Setup: libraries and output directory
+
+```{r libs}
+# Core tidyverse-style stack
+library(tidyverse)   # dplyr, tidyr, stringr, ggplot2, readr, purrr
+library(janitor)     # clean_names()
+library(stringr)     # path parsing
+library(scales)      # nice axis labels
+
+# Optional helpers (loaded if available; pipeline degrades gracefully otherwise)
+have_broom <- requireNamespace("broom", quietly = TRUE)
+have_knitr <- requireNamespace("knitr", quietly = TRUE)
+
+theme_set(theme_minimal(base_size = 12))
+
+# Input is expected at ../results/predictions.csv when this Rmd is inside pipeline/.
+# Outputs are written to ../psthoc so the original prediction results stay untouched.
+output_dir <- params$output_dir
+if (!dir.exists(output_dir)) dir.create(output_dir, recursive = TRUE)
+
+plots_dir <- file.path(output_dir, "plots")
+if (!dir.exists(plots_dir)) dir.create(plots_dir, recursive = TRUE)
+
+# Small helper: save a ggplot as PNG into ../psthoc/plots
+save_plot <- function(plot, filename, width = 8, height = 5, dpi = 150) {
+  ggsave(file.path(plots_dir, filename), plot = plot,
+         width = width, height = height, dpi = dpi)
+  invisible(file.path(plots_dir, filename))
+}
+```
+
+# Data import (robust to filename)
+
+```{r import}
+# Resolve the input file: try the param, then a couple of common variants.
+candidate_paths <- c(
+  params$input_csv,
+  "../results/predictions.csv",
+  "../results/prediction.csv"
+)
+input_path <- candidate_paths[file.exists(candidate_paths)][1]
+
+if (is.na(input_path)) {
+  stop(
+    "Could not find the input CSV. Looked for: ",
+    paste(unique(candidate_paths), collapse = ", "),
+    ". Set params$input_csv to the correct path."
+  )
+}
+message("Reading: ", input_path)
+
+raw <- readr::read_csv(input_path, show_col_types = FALSE)
+
+# Standardise column names (snake_case) for robustness to capitalisation/spacing
+df <- raw %>% janitor::clean_names()
+glimpse(df)
+```
+
+# Column detection (robust to naming differences)
+
+The pipeline does not assume exact column names. It searches for the columns it
+needs using flexible pattern matching and reports what it found.
+
+```{r detect-cols}
+# Helper: find the first existing column whose name matches any of the patterns
+find_col <- function(data, patterns) {
+  nms <- names(data)
+  for (p in patterns) {
+    hit <- nms[str_detect(nms, regex(p, ignore_case = TRUE))]
+    if (length(hit) > 0) return(hit[1])
+  }
+  NA_character_
+}
+
+# --- Detect the image-path column automatically ---------------------------
+# Strategy: among character columns, pick the one whose values most look like
+# file paths (contain "/" and end in an image extension). Fall back to name match.
+detect_path_col <- function(data) {
+  char_cols <- names(data)[map_lgl(data, is.character)]
+  if (length(char_cols) == 0) return(NA_character_)
+  score_path <- function(x) {
+    x <- x[!is.na(x)]
+    if (length(x) == 0) return(0)
+    mean(str_detect(x, "/") &
+         str_detect(x, regex("\\.(tif|tiff|png|jpg|jpeg|svs|ndpi)$", ignore_case = TRUE)))
+  }
+  scores <- map_dbl(data[char_cols], score_path)
+  if (max(scores) > 0.5) return(char_cols[which.max(scores)])
+  # fallback to name-based detection
+  find_col(data, c("file_?path", "image_?path", "path", "file_?name", "image"))
+}
+
+path_col      <- detect_path_col(df)
+true_col      <- find_col(df, c("^true_label$", "true_?label", "expected", "actual", "ground_?truth"))
+pred_col      <- find_col(df, c("^predicted_label$", "pred(icted)?_?label", "prediction", "class"))
+correct_col   <- find_col(df, c("^correct$", "is_correct", "correctness", "match"))
+group_col_in  <- find_col(df, c("^brain_region$", "group", "genotype", "treatment", "condition"))
+# Continuous / score columns (optional)
+infection_col <- find_col(df, c("infection_score", "disease_score", "prp_?score"))
+ood_col       <- find_col(df, c("ood_score", "ood", "outlier"))
+subtype_col   <- find_col(df, c("new_?subtype", "potential_new"))
+
+detected <- tibble::tibble(
+  role = c("image_path", "true_label", "predicted_label", "correct",
+           "incoming_group/brain_region", "infection_score", "ood_score", "new_subtype"),
+  column = c(path_col, true_col, pred_col, correct_col,
+             group_col_in, infection_col, ood_col, subtype_col)
+)
+detected
+
+# Hard requirement: we MUST have a path column to recover the true brain region.
+if (is.na(path_col)) {
+  stop("No image-path column detected. A path/filename column is required to ",
+       "extract the true brain region (e.g. .../septum_4x/...tif). ",
+       "Please point params at a file containing image paths.")
+}
+message("Using image-path column: '", path_col, "'")
+```
+
+# Data cleaning and brain-region extraction
+
+The incoming `brain_region` column is **incorrect** — it holds experimental-group
+labels (e.g. `GtDeer`, `GtElk`, `controls`) rather than anatomical regions. The
+true region lives in the path, in the folder immediately above the file
+(e.g. `.../septum_4x/...`). We:
+
+1. Preserve the original column as `original_brain_region_label`.
+2. Extract the region folder, strip any magnification suffix (`_4x`, `_10x`, …).
+3. **Normalise case** (so `Cerebellum_4x` and `cerebellum_4x` collapse to one
+   region — this genuinely occurs in the data).
+
+```{r clean-region}
+# Generic region extractor: take the second-to-last path component (the folder
+# that contains the image), strip a trailing magnification token, lowercase it.
+extract_brain_region <- function(path) {
+  parts <- str_split(path, "/")
+  vapply(parts, function(p) {
+    p <- p[p != ""]
+    if (length(p) < 2) return(NA_character_)
+    folder <- p[length(p) - 1]                       # e.g. "septum_4x" / "Cerebellum_4x"
+    region <- str_remove(folder, regex("_\\d+x$", ignore_case = TRUE))  # strip _4x/_10x/_20x...
+    str_to_lower(str_trim(region))                   # normalise case -> "septum","cerebellum"
+  }, character(1))
+}
+
+# A tidy display label (Title Case) for plots/tables, distinct from the join key.
+display_region <- function(x) str_to_title(x)
+
+# Preserve the incoming mislabelled brain_region/group column when present.
+# If no such column exists, create a placeholder so the rest of the report still runs.
+if (!is.na(group_col_in) && group_col_in %in% names(df)) {
+  df_clean <- df %>%
+    rename(original_brain_region_label = !!sym(group_col_in))
+} else {
+  df_clean <- df %>%
+    mutate(original_brain_region_label = NA_character_)
+}
+
+# Add corrected anatomical region extracted from the image path.
+df_clean <- df_clean %>%
+  mutate(
+    image_path = .data[[path_col]],
+    brain_region = extract_brain_region(image_path),
+    brain_region_display = display_region(brain_region)
+  )
+
+# Experimental group: prefer the (correct) true_label; fall back to the original
+# mislabelled column or to the group folder in the path (data/<group>/...).
+group_from_path <- function(path) {
+  m <- str_match(path, "/data/([^/]+)/")
+  m[, 2]
+}
+if (!is.na(true_col) && true_col %in% names(df_clean)) {
+  df_clean <- df_clean %>%
+    mutate(experimental_group = .data[[true_col]])
+} else {
+  df_clean <- df_clean %>%
+    mutate(experimental_group = original_brain_region_label)
+}
+
+df_clean <- df_clean %>%
+  mutate(
+    experimental_group = ifelse(is.na(experimental_group) | experimental_group == "",
+                                group_from_path(image_path), experimental_group)
+  )
+
+# Normalise correctness to a logical, however it was encoded.
+if (!is.na(correct_col)) {
+  df_clean <- df_clean %>%
+    mutate(correct = as.logical(
+      dplyr::case_when(
+        tolower(as.character(.data[[correct_col]])) %in% c("true","t","1","yes","correct") ~ "TRUE",
+        tolower(as.character(.data[[correct_col]])) %in% c("false","f","0","no","incorrect") ~ "FALSE",
+        TRUE ~ as.character(.data[[correct_col]])
+      )
+    ))
+} else if (!is.na(true_col) && !is.na(pred_col)) {
+  # Derive correctness if not provided but both labels exist.
+  df_clean <- df_clean %>%
+    mutate(correct = .data[[true_col]] == .data[[pred_col]])
+} else {
+  warning("No correctness column and cannot derive it; accuracy metrics will be skipped.")
+  df_clean$correct <- NA
+}
+```
+
+## Defining the "disease-associated" prediction label
+
+Predictions here are **genotype labels**, not an explicit disease/non-disease
+flag. We infer the disease-positive set as the predicted labels that are **not**
+control-like (matching `control`, `ctrl`, `wt`, `wild`). Everything else
+(`GtDeer`, `GtElk`, …) is treated as **disease-associated**. This assumption is
+stated explicitly and is easy to override below.
+
+```{r disease-label}
+control_pattern <- regex("control|ctrl|^wt$|wild", ignore_case = TRUE)
+
+# >>> USER OVERRIDE POINT <<<
+# If the automatic inference is wrong for your labels, hard-set these vectors:
+#   disease_labels <- c("GtDeer", "GtElk")
+#   control_labels <- c("controls")
+if (!is.na(pred_col)) {
+  pred_levels    <- sort(unique(na.omit(df_clean[[pred_col]])))
+  control_labels <- pred_levels[str_detect(pred_levels, control_pattern)]
+  disease_labels <- setdiff(pred_levels, control_labels)
+
+  message("Inferred control label(s): ",
+          ifelse(length(control_labels), paste(control_labels, collapse=", "), "<none>"))
+  message("Inferred disease label(s): ",
+          ifelse(length(disease_labels), paste(disease_labels, collapse=", "), "<none>"))
+
+  if (length(disease_labels) == 0) {
+    warning("Could not infer any disease-associated predicted label. ",
+            "Define `disease_labels` manually in this chunk.")
+  }
+
+  df_clean <- df_clean %>%
+    mutate(
+      predicted_disease = .data[[pred_col]] %in% disease_labels,           # ML calls it disease
+      group_is_control  = str_detect(experimental_group, control_pattern), # true control mouse
+      group_class       = ifelse(group_is_control, "Control", "Disease")
+    )
+} else {
+  warning("No predicted-label column; categorical disease-rate analysis skipped.")
+}
+```
+
+# Sanity checks
+
+```{r sanity}
+cat("Number of rows:", nrow(df_clean), "\n")
+cat("Number of columns:", ncol(df_clean), "\n\n")
+
+cat("Column names:\n"); print(names(df_clean))
+
+cat("\nMissing values per key column:\n")
+key_cols <- c("image_path","brain_region","experimental_group",
+              true_col, pred_col, "correct", infection_col)
+key_cols <- key_cols[!is.na(key_cols) & key_cols %in% names(df_clean)]
+df_clean %>% summarise(across(all_of(key_cols), ~ sum(is.na(.)))) %>% as.data.frame()
+
+cat("\nUnique experimental groups:\n"); print(sort(unique(df_clean$experimental_group)))
+cat("\nUnique brain regions (cleaned):\n"); print(sort(unique(df_clean$brain_region)))
+
+cat("\nExamples: original path -> cleaned brain_region\n")
+df_clean %>%
+  transmute(image_path, original_brain_region_label, brain_region) %>%
+  group_by(brain_region) %>% slice_head(n = 1) %>% ungroup() %>%
+  as.data.frame() %>% print(right = FALSE)
+
+cat("\nCross-tab: group x cleaned region (counts)\n")
+df_clean %>% count(experimental_group, brain_region) %>%
+  pivot_wider(names_from = experimental_group, values_from = n, values_fill = 0) %>%
+  as.data.frame() %>% print(right = FALSE)
+```
+
+> **Small-sample warning.** Several `group × region` cells contain only a handful
+> of images. Counts are printed above so that every downstream estimate can be
+> read against its sample size; treat cells with n < 10 as exploratory.
+
+# Accuracy analysis
+
+Accuracy here measures how often the classifier's predicted genotype matches the
+true genotype. It is a **model-performance** metric, useful mainly to gauge which
+regions the model finds easy vs. hard.
+
+```{r accuracy}
+acc_summary <- function(data, ...) {
+  data %>%
+    group_by(...) %>%
+    summarise(
+      total     = n(),
+      n_correct = sum(correct, na.rm = TRUE),
+      n_incorrect = sum(!correct, na.rm = TRUE),
+      accuracy  = n_correct / total,
+      error_rate = n_incorrect / total,
+      .groups = "drop"
+    ) %>% arrange(desc(accuracy))
+}
+
+accuracy_by_region        <- acc_summary(df_clean, brain_region)
+accuracy_by_group         <- acc_summary(df_clean, experimental_group)
+accuracy_by_group_region  <- acc_summary(df_clean, experimental_group, brain_region)
+
+accuracy_by_region
+accuracy_by_group
+accuracy_by_group_region
+```
+
+# Disease-indicative score analysis
+
+Two complementary scores are computed, both transparent:
+
+* **Categorical disease-prediction rate** — the proportion of images a region's
+  mice are *predicted* as a disease genotype. Useful, but note it is partly
+  **circular**: a GtDeer image correctly classified as GtDeer is "disease-predicted"
+  almost by construction, so within disease groups this rate saturates near 1.
+* **Continuous infection / deposition score** (`infection_score`, if present) —
+  a model-derived quantitative proxy for PrP deposition. Because it is *graded*
+  rather than a near-perfect genotype call, it discriminates regions more finely
+  and is the **primary** disease signal we rank on.
+
+The region-level contrast is always **disease groups − controls**, computed for
+GtDeer vs Control, GtElk vs Control, and combined disease vs Control.
+
+```{r wilson-ci}
+# Wilson score interval for a binomial proportion (robust at small n; no extra deps)
+wilson_ci <- function(x, n, conf = 0.95) {
+  if (n == 0) return(c(lower = NA_real_, upper = NA_real_))
+  z <- qnorm(1 - (1 - conf) / 2)
+  p <- x / n
+  denom <- 1 + z^2 / n
+  centre <- (p + z^2 / (2 * n)) / denom
+  half <- (z * sqrt(p * (1 - p) / n + z^2 / (4 * n^2))) / denom
+  c(lower = max(0, centre - half), upper = min(1, centre + half))
+}
+```
+
+```{r disease-categorical}
+# disease_prediction_rate = predicted-as-disease / total, per group x region
+disease_rate_cells <- df_clean %>%
+  group_by(brain_region, experimental_group) %>%
+  summarise(
+    n = n(),
+    n_disease_pred = sum(predicted_disease, na.rm = TRUE),
+    disease_prediction_rate = n_disease_pred / n,
+    .groups = "drop"
+  ) %>%
+  rowwise() %>%
+  mutate(
+    ci_lower = wilson_ci(n_disease_pred, n)[["lower"]],
+    ci_upper = wilson_ci(n_disease_pred, n)[["upper"]]
+  ) %>% ungroup()
+
+disease_rate_cells
+
+# Region-level contrasts: disease group(s) vs control
+# Identify which group label is the control vs each disease genotype.
+ctrl_grp <- df_clean %>% filter(group_is_control) %>% pull(experimental_group) %>% unique()
+dis_grps <- df_clean %>% filter(!group_is_control) %>% pull(experimental_group) %>% unique()
+
+rate_for <- function(region, groups) {
+  sub <- df_clean %>% filter(brain_region == region, experimental_group %in% groups)
+  if (nrow(sub) == 0) return(NA_real_)
+  mean(sub$predicted_disease, na.rm = TRUE)
+}
+
+regions <- sort(unique(df_clean$brain_region))
+disease_indicative_scores <- map_dfr(regions, function(rg) {
+  rate_ctrl <- rate_for(rg, ctrl_grp)
+  tibble(
+    brain_region = rg,
+    rate_GtDeer  = rate_for(rg, intersect(dis_grps, "GtDeer")),
+    rate_GtElk   = rate_for(rg, intersect(dis_grps, "GtElk")),
+    rate_disease_combined = rate_for(rg, dis_grps),
+    rate_control = rate_ctrl,
+    score_GtDeer_vs_control   = rate_for(rg, intersect(dis_grps, "GtDeer")) - rate_ctrl,
+    score_GtElk_vs_control    = rate_for(rg, intersect(dis_grps, "GtElk"))  - rate_ctrl,
+    score_combined_vs_control = rate_for(rg, dis_grps) - rate_ctrl
+  )
+})
+disease_indicative_scores
+```
+
+```{r disease-continuous}
+# Continuous deposition score (infection_score) — the primary ranking signal.
+if (!is.na(infection_col)) {
+  inf_sym <- sym(infection_col)
+
+  # Simple percentile bootstrap for the (disease - control) mean difference.
+  boot_diff <- function(dis_vals, ctrl_vals, B = 2000, conf = 0.95) {
+    dis_vals <- dis_vals[!is.na(dis_vals)]; ctrl_vals <- ctrl_vals[!is.na(ctrl_vals)]
+    if (length(dis_vals) < 2 || length(ctrl_vals) < 2)
+      return(c(diff = mean(dis_vals) - mean(ctrl_vals), lower = NA, upper = NA))
+    set.seed(42)
+    diffs <- replicate(B, mean(sample(dis_vals, replace = TRUE)) -
+                          mean(sample(ctrl_vals, replace = TRUE)))
+    c(diff  = mean(dis_vals) - mean(ctrl_vals),
+      lower = unname(quantile(diffs, (1 - conf) / 2)),
+      upper = unname(quantile(diffs, 1 - (1 - conf) / 2)))
+  }
+
+  infection_scores <- map_dfr(regions, function(rg) {
+    sub  <- df_clean %>% filter(brain_region == rg)
+    disv <- sub %>% filter(!group_is_control) %>% pull(!!inf_sym)
+    ctlv <- sub %>% filter(group_is_control)  %>% pull(!!inf_sym)
+    bd   <- boot_diff(disv, ctlv)
+    tibble(
+      brain_region = rg,
+      mean_inf_disease = mean(disv, na.rm = TRUE),
+      mean_inf_control = mean(ctlv, na.rm = TRUE),
+      inf_score_diff   = bd[["diff"]],
+      inf_ci_lower     = bd[["lower"]],
+      inf_ci_upper     = bd[["upper"]]
+    )
+  }) %>% arrange(desc(inf_score_diff))
+
+  # Merge continuous + categorical into one master scoring table.
+  disease_indicative_scores <- disease_indicative_scores %>%
+    left_join(infection_scores, by = "brain_region") %>%
+    arrange(desc(inf_score_diff))
+  infection_scores
+} else {
+  message("No infection_score column found; ranking on the categorical ",
+          "disease-prediction contrast only.")
+}
+disease_indicative_scores
+```
+
+# Statistical / post-hoc comparisons
+
+We test (a) accuracy across regions, (b) disease-prediction rates across regions,
+and the pairwise group contrasts within each region: **GtDeer vs Control**,
+**GtElk vs Control**, **GtDeer vs GtElk**. Categorical contrasts use **Fisher's
+exact test** (appropriate at the small counts here); p-values are corrected with
+**Benjamini–Hochberg FDR**. A logistic-regression view is included with explicit
+notes about separation.
+
+```{r posthoc-tests}
+# Generic 2-group Fisher test on a binary outcome within a region.
+fisher_outcome <- function(data, region, g1, g2, outcome_col) {
+  sub <- data %>% filter(brain_region == region,
+                         experimental_group %in% c(g1, g2))
+  if (length(unique(sub$experimental_group)) < 2)
+    return(tibble(p_value = NA_real_, n_g1 = NA, n_g2 = NA, note = "missing a group"))
+  tab <- table(factor(sub$experimental_group, levels = c(g1, g2)),
+               factor(sub[[outcome_col]], levels = c(FALSE, TRUE)))
+  ft <- tryCatch(fisher.test(tab), error = function(e) NULL)
+  tibble(
+    p_value = if (is.null(ft)) NA_real_ else ft$p.value,
+    n_g1 = sum(sub$experimental_group == g1),
+    n_g2 = sum(sub$experimental_group == g2),
+    note = if (min(rowSums(tab)) < 5 || min(colSums(tab)) < 5) "small cells" else ""
+  )
+}
+
+# Build the pairwise comparison grid on the disease-prediction outcome.
+pairs_grid <- tibble::tribble(
+  ~comparison,            ~g1,       ~g2,
+  "GtDeer vs Control",    "GtDeer",  ctrl_grp[1],
+  "GtElk vs Control",     "GtElk",   ctrl_grp[1],
+  "GtDeer vs GtElk",      "GtDeer",  "GtElk"
+)
+
+posthoc_pairwise_tests <- tidyr::expand_grid(brain_region = regions, pairs_grid) %>%
+  mutate(res = pmap(list(brain_region, g1, g2),
+                    ~ fisher_outcome(df_clean, ..1, ..2, ..3, "predicted_disease"))) %>%
+  unnest(res) %>%
+  group_by(comparison) %>%
+  mutate(p_adj_BH = p.adjust(p_value, method = "BH")) %>%
+  ungroup() %>%
+  select(brain_region, comparison, g1, g2, n_g1, n_g2, p_value, p_adj_BH, note) %>%
+  arrange(comparison, brain_region)
+
+posthoc_pairwise_tests
+
+# (a) Accuracy across regions: region x correct contingency test.
+acc_tab <- table(df_clean$brain_region, df_clean$correct)
+acc_region_test <- tryCatch(
+  fisher.test(acc_tab, simulate.p.value = TRUE, B = 1e5),
+  error = function(e) chisq.test(acc_tab)
+)
+cat("Accuracy across regions — test p-value:", signif(acc_region_test$p.value, 4), "\n")
+
+# (b) Disease-prediction rate across regions (within disease-group mice only,
+#     since controls are ~0 by construction): region x predicted_disease.
+dis_only <- df_clean %>% filter(!group_is_control)
+if (nrow(dis_only) > 0 && length(unique(dis_only$brain_region)) > 1) {
+  rate_tab <- table(dis_only$brain_region, dis_only$predicted_disease)
+  rate_region_test <- tryCatch(
+    fisher.test(rate_tab, simulate.p.value = TRUE, B = 1e5),
+    error = function(e) chisq.test(rate_tab))
+  cat("Disease-prediction rate across regions (disease mice) — p-value:",
+      signif(rate_region_test$p.value, 4), "\n")
+}
+```
+
+```{r logistic, results='hold'}
+# Logistic-regression view. With near-perfect genotype separation, a model of
+# predicted_disease ~ group will exhibit complete separation (coeffs blow up);
+# we therefore (i) model *accuracy* by region, which is well-behaved, and
+# (ii) attempt the disease model inside tryCatch with a separation note.
+if (have_broom) {
+  fit_acc <- glm(correct ~ brain_region, data = df_clean, family = binomial())
+  cat("\n--- Logistic: correct ~ brain_region ---\n")
+  print(broom::tidy(fit_acc))
+}
+
+sep_note <- tryCatch({
+  fit_dis <- glm(predicted_disease ~ group_class, data = df_clean, family = binomial())
+  if (have_broom) print(broom::tidy(fit_dis))
+  "Model fit (check for inflated SEs indicating separation)."
+}, warning = function(w) paste("Separation likely:", conditionMessage(w)),
+   error   = function(e) paste("Model failed:", conditionMessage(e)))
+cat("\nDisease ~ group note:", sep_note, "\n")
+```
+
+> **Assumption notes.** (1) Fisher's exact test is used instead of chi-square
+> because several cells have expected counts < 5. (2) Within disease genotypes,
+> the categorical disease-prediction rate saturates near 1.0, so the corresponding
+> contrasts mainly confirm the classifier separates disease from control — they
+> are **not** evidence that one region is biologically more disease-indicative
+> than another. The continuous `infection_score` contrast is the more informative
+> ranking. (3) All p-values are FDR-corrected within each comparison family.
+
+# Visualizations
+
+```{r colors}
+group_levels <- df_clean %>% distinct(experimental_group) %>% pull()
+region_levels <- sort(unique(df_clean$brain_region))
+```
+
+## 1. Accuracy by brain region
+
+```{r plot-acc-region}
+p1 <- accuracy_by_region %>%
+  mutate(brain_region = fct_reorder(str_to_title(brain_region), accuracy)) %>%
+  ggplot(aes(brain_region, accuracy, fill = accuracy)) +
+  geom_col() +
+  geom_text(aes(label = sprintf("%.0f%%\n(n=%d)", 100*accuracy, total)),
+            vjust = -0.2, size = 3) +
+  scale_y_continuous(labels = percent, limits = c(0, 1.1), breaks = seq(0,1,.25)) +
+  scale_fill_viridis_c(option = "D", guide = "none") +
+  labs(title = "Classification accuracy by brain region",
+       x = NULL, y = "Accuracy")
+p1; save_plot(p1, "01_accuracy_by_region.png")
+```
+
+## 2. Accuracy by brain region and group
+
+```{r plot-acc-group-region}
+p2 <- accuracy_by_group_region %>%
+  ggplot(aes(str_to_title(brain_region), accuracy, fill = experimental_group)) +
+  geom_col(position = position_dodge(0.8), width = 0.75) +
+  geom_text(aes(label = total), position = position_dodge(0.8),
+            vjust = -0.3, size = 2.8) +
+  scale_y_continuous(labels = percent, limits = c(0, 1.1)) +
+  labs(title = "Accuracy by brain region and group",
+       subtitle = "Bar labels = n images", x = NULL, y = "Accuracy",
+       fill = "Group")
+p2; save_plot(p2, "02_accuracy_by_group_region.png")
+```
+
+## 3. Heatmap of accuracy (group × region)
+
+```{r plot-heat-acc}
+p3 <- accuracy_by_group_region %>%
+  ggplot(aes(str_to_title(brain_region), experimental_group, fill = accuracy)) +
+  geom_tile(color = "white", linewidth = 0.5) +
+  geom_text(aes(label = sprintf("%.0f%%\n(%d)", 100*accuracy, total)), size = 3) +
+  scale_fill_viridis_c(option = "D", labels = percent, limits = c(0,1)) +
+  labs(title = "Accuracy heatmap (group × region)",
+       x = NULL, y = NULL, fill = "Accuracy")
+p3; save_plot(p3, "03_heatmap_accuracy.png")
+```
+
+## 4. Heatmap of disease-indicative score (group × region)
+
+```{r plot-heat-disease}
+# Use the categorical disease-prediction rate per cell for the group x region heatmap.
+p4 <- disease_rate_cells %>%
+  ggplot(aes(str_to_title(brain_region), experimental_group, fill = disease_prediction_rate)) +
+  geom_tile(color = "white", linewidth = 0.5) +
+  geom_text(aes(label = sprintf("%.2f\n(%d)", disease_prediction_rate, n)), size = 3) +
+  scale_fill_viridis_c(option = "C", labels = percent, limits = c(0,1)) +
+  labs(title = "Disease-prediction rate (group × region)",
+       subtitle = "Proportion predicted as a disease genotype; cell n in parentheses",
+       x = NULL, y = NULL, fill = "Disease\npred. rate")
+p4; save_plot(p4, "04_heatmap_disease_score.png")
+```
+
+## 5. Ranked plot of regions by disease-indicative score
+
+```{r plot-rank}
+# Primary ranking: continuous infection_score contrast if available, else categorical.
+if (!is.na(infection_col) && "inf_score_diff" %in% names(disease_indicative_scores)) {
+  rank_df <- disease_indicative_scores %>%
+    transmute(brain_region, score = inf_score_diff,
+              lo = inf_ci_lower, hi = inf_ci_upper)
+  ylab <- "Mean infection_score difference (disease − control)"
+  subt <- "Primary signal: continuous deposition score; bars = bootstrap 95% CI"
+} else {
+  rank_df <- disease_indicative_scores %>%
+    transmute(brain_region, score = score_combined_vs_control, lo = NA, hi = NA)
+  ylab <- "Disease-prediction rate difference (disease − control)"
+  subt <- "Categorical fallback signal"
+}
+
+p5 <- rank_df %>%
+  mutate(brain_region = fct_reorder(str_to_title(brain_region), score)) %>%
+  ggplot(aes(score, brain_region)) +
+  geom_col(aes(fill = score)) +
+  { if (all(!is.na(rank_df$lo))) geom_errorbarh(aes(xmin = lo, xmax = hi), height = .2) } +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  scale_fill_viridis_c(option = "C", guide = "none") +
+  labs(title = "Brain regions ranked by disease-indicative score",
+       subtitle = subt, x = ylab, y = NULL)
+p5; save_plot(p5, "05_ranked_disease_score.png")
+```
+
+## 6. Confusion matrix (true × predicted)
+
+```{r plot-confusion}
+if (!is.na(true_col) && !is.na(pred_col)) {
+  conf_df <- df_clean %>%
+    count(truth = .data[[true_col]], prediction = .data[[pred_col]])
+  p6 <- conf_df %>%
+    ggplot(aes(prediction, truth, fill = n)) +
+    geom_tile(color = "white", linewidth = 0.5) +
+    geom_text(aes(label = n), size = 4) +
+    scale_fill_viridis_c(option = "G", guide = "none") +
+    labs(title = "Confusion matrix (overall)", x = "Predicted", y = "True")
+  print(p6); save_plot(p6, "06_confusion_matrix.png")
+
+  # Optional per-region small multiples
+  p6b <- df_clean %>%
+    count(brain_region, truth = .data[[true_col]], prediction = .data[[pred_col]]) %>%
+    ggplot(aes(prediction, truth, fill = n)) +
+    geom_tile(color = "white") + geom_text(aes(label = n), size = 3) +
+    facet_wrap(~ str_to_title(brain_region)) +
+    scale_fill_viridis_c(option = "G", guide = "none") +
+    labs(title = "Confusion matrices by brain region",
+         x = "Predicted", y = "True") +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  print(p6b); save_plot(p6b, "06b_confusion_by_region.png", height = 6)
+}
+```
+
+## 7. Image counts per region (reliability context)
+
+```{r plot-counts}
+p7 <- df_clean %>%
+  count(brain_region, experimental_group) %>%
+  ggplot(aes(str_to_title(brain_region), n, fill = experimental_group)) +
+  geom_col(position = "stack") +
+  geom_text(aes(label = n), position = position_stack(vjust = .5), size = 3) +
+  labs(title = "Image counts per brain region",
+       subtitle = "Read every estimate above against these sample sizes",
+       x = NULL, y = "Number of images", fill = "Group")
+p7; save_plot(p7, "07_image_counts.png")
+```
+
+# Summary tables
+
+```{r summary-tables}
+show_tbl <- function(x, caption) {
+  if (have_knitr) knitr::kable(x, digits = 3, caption = caption) else x
+}
+show_tbl(accuracy_by_region, "Accuracy by brain region")
+show_tbl(accuracy_by_group_region, "Accuracy by group × region")
+show_tbl(disease_indicative_scores, "Disease-indicative scores by region")
+show_tbl(posthoc_pairwise_tests %>% filter(!is.na(p_value)),
+         "Post-hoc pairwise tests (Fisher, BH-corrected)")
+```
+
+
+# Export
+
+```{r export}
+cleaned_path <- file.path(output_dir, "cleaned_predictions.csv")
+readr::write_csv(df_clean, cleaned_path)
+readr::write_csv(accuracy_by_region,        file.path(output_dir, "accuracy_by_region.csv"))
+readr::write_csv(accuracy_by_group_region,  file.path(output_dir, "accuracy_by_group_region.csv"))
+readr::write_csv(disease_indicative_scores, file.path(output_dir, "disease_indicative_scores.csv"))
+readr::write_csv(posthoc_pairwise_tests,    file.path(output_dir, "posthoc_pairwise_tests.csv"))
+
+cat("Wrote outputs to '", output_dir, "/':\n", sep = "")
+cat(" - cleaned_predictions.csv\n - accuracy_by_region.csv\n",
+    "- accuracy_by_group_region.csv\n - disease_indicative_scores.csv\n",
+    "- posthoc_pairwise_tests.csv\n - plots/*.png\n", sep = "")
+list.files(plots_dir)
+```
+
+# Session info
+
+```{r session}
+sessionInfo()
+```
