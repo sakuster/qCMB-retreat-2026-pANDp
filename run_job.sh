@@ -6,7 +6,7 @@
 #   sbatch run_job.sh
 #
 # Monitor with:
-#   squeue -u $USER
+#   squeue -u $ka22popl
 #
 # View output:
 #   cat logs/prion_pipeline.out
