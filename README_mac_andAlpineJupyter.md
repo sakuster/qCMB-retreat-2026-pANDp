@@ -5,9 +5,9 @@
 
 ---
 
-## Setup (run once)
+## Setup (run once) DOUBLE CHECK the name of the folder in downloads matches below
 
-Open **Terminal** and navigate to this folder:
+Open **Terminal** or **Alpine Jupyter Terminal** and navigate to this folder:
 ```
 cd ~/Downloads/qCMBRetreat26/qCMB-retreat-2026-pANDp
 ```
@@ -29,6 +29,13 @@ pip install -r requirements.txt
 ```
 
 ---
+
+
+##IMPORTANT: Make sure to change the paths and directory names as well as user names in the following files:
+- run_job.sh (user name)
+- config_alpine.yaml (data and output directories, usernames in both directories)
+
+  
 
 ## Run the pipeline
 
