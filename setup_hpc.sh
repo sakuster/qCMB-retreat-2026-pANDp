@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# setup_hpc.sh — Install pipeline dependencies into the base conda environment
+# setup_hpc.sh — Create conda environment and install all dependencies
 # =============================================================================
 # Run once from the project directory:
 #   bash setup_hpc.sh
@@ -8,22 +8,18 @@
 
 set -e
 
-echo "Installing PyTorch with CUDA 11.8 support ..."
+echo "Creating conda environment 'prion_pipeline' ..."
+conda create -n prion_pipeline python=3.11 -y
+
+echo "Activating environment ..."
+source /curc/sw/anaconda3/2020.11/etc/profile.d/conda.sh
+conda activate prion_pipeline
+
+echo "Installing PyTorch with CUDA support ..."
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
 
 echo "Installing remaining dependencies ..."
-pip install \
-    scikit-learn \
-    pandas \
-    numpy \
-    Pillow \
-    tqdm \
-    pyyaml \
-    umap-learn \
-    matplotlib \
-    seaborn \
-    grad-cam \
-    scipy
+pip install -r requirements.txt
 
 echo ""
 echo "================================================================"
