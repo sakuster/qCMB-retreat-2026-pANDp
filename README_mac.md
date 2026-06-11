@@ -65,3 +65,18 @@ net.to(dev)
 ```
 torch.cuda.is_available()
 ```
+
+##Custom parameters for setting up a Jupyter notebook to run this code
+- Anaconda Version: 2020.11
+- Conda environment: base
+- Configureation Type: Custom configuration
+- Cluter: Alpine
+- Account: csu-general
+- Partition: atesting_a100
+- QoS: testing
+- Time: 1
+- Number of cores: 1
+- Reservation: None
+- gres: gpu
+- nodelist: none
+- Constraint: none
