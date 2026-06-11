@@ -1,0 +1,9 @@
+##README
+
+#This folder contains the results from the running of the script "run.py" using pytorch on Alpine Jupyter interactive notebook.
+#The only results that are missing is the heatmaps made by GradCAM. This folder of images was too large to import onto github.
+#All the results, the GradCAM heatmaps and the results in this folder can be found on Alpine under the following path:
+
+/pl/active/courses/2026_summer/CSU_qCMB
+
+#In addition to the results, there is a script file produced by Eli that conducts post-hoc analysis and analysis related to the regions of the brain since our code chose to focus on the species.
