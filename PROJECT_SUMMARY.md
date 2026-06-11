@@ -16,8 +16,8 @@ We fine-tune **EfficientNet-B4** — a convolutional neural network pretrained o
 | Class   | Description                                      | Images |
 |---------|--------------------------------------------------|--------|
 | Control | Wild-type, non-prion-susceptible mice            | 143    |
-| GtElk   | Gene-targeted "Elk-inized" mice, prion-infected  | 163    |
-| GtDeer  | Gene-targeted "Deer-inized" mice, prion-infected | 385    |
+| GtE     | Gene-targeted "Elk-inized" mice, prion-infected  | 163    |
+| GtQ     | Gene-targeted "Deer-inized" mice, prion-infected | 385    |
 
 Four brain regions are represented per condition: **Cerebellum, Hippocampus, Midbrain, Septum**.
 
@@ -46,7 +46,7 @@ The pipeline has five stages:
 ### 2a. Ambition
 
 This pipeline goes beyond binary prion detection. It simultaneously:
-- Performs **3-class subtype classification** (Control / GtElk / GtDeer)
+- Performs **3-class subtype classification** (Control / GtE / GtQ)
 - Provides **open-set recognition** — the ability to flag images that do not belong to any trained class, without requiring labels for novel categories
 - Produces **spatially interpretable outputs** (GradCAM heatmaps tied to anatomical regions)
 - Captures **brain region metadata** automatically from folder structure, enabling region-stratified analysis of results
@@ -65,11 +65,10 @@ On a single GPU (as available on Alpine HPC), the full pipeline — data loading
 
 ### 3a. Presentation Outline
 
-**Introduction (2 min)**
-- Prion disease background: heterogeneous PrP deposition patterns distinguish subtypes
+**Introduction (1 min)**
+- Prion disease background: difference between GtE and GtQ (biorender schematic)
 - Challenge: automate what neuropathologists currently do qualitatively
-
-**Data (1 min)**
+- Question
 - 691 4× IHC coronal sections across 3 conditions and 4 brain regions
 - Class imbalance, folder structure, image characteristics
 
